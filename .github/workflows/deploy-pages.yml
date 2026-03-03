@@ -32,6 +32,10 @@ jobs:
         run: npm ci
 
       - name: Build
+        env:
+          VITE_RECLAIM_APP_ID: ${{ secrets.VITE_RECLAIM_APP_ID }}
+          VITE_RECLAIM_APP_SECRET: ${{ secrets.VITE_RECLAIM_APP_SECRET }}
+          VITE_RECLAIM_PROVIDER_ID: ${{ secrets.VITE_RECLAIM_PROVIDER_ID }}
         run: npm run build
 
       - name: Upload artifact
