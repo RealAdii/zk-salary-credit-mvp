@@ -22,6 +22,12 @@ body {
   padding: 0 1rem 2rem;
 }
 
+.page.successMode {
+  height: 100vh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
 .topbar {
   height: 52px;
   display: grid;
@@ -212,6 +218,23 @@ h1 {
   margin-top: 1rem;
 }
 
+.loanScreen {
+  min-height: calc(100vh - 132px);
+  display: grid;
+  place-items: center;
+  padding: 0.8rem 0 1rem;
+}
+
+.loanPanel {
+  width: min(920px, 96vw);
+  margin: 0;
+}
+
+.loanPanel h2 {
+  margin: 0 0 0.8rem;
+  font-size: 1.55rem;
+}
+
 .card {
   margin-top: 1rem;
   border: 1px solid #d6deea;
@@ -273,6 +296,33 @@ h1 {
   margin: 0.5rem 0 0;
 }
 
+.proofDetails {
+  margin-top: 0.9rem;
+  border: 1px solid #d6deea;
+  background: #fff;
+}
+
+.proofDetails summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: #2048ff;
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid #edf2fa;
+}
+
+.proofDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.proofDetails pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
 .error {
   color: #d22e2e;
 }
@@ -327,6 +377,15 @@ pre {
   .heroWrap {
     min-height: auto;
     margin-top: 1rem;
+  }
+
+  .loanScreen {
+    min-height: auto;
+    padding: 1rem 0 1.25rem;
+  }
+
+  .loanPanel h2 {
+    font-size: 1.25rem;
   }
 
   .panelHero {

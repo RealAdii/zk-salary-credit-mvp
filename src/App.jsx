@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 import { ReclaimProofRequest } from '@reclaimprotocol/js-sdk'
 import {
+  extractCompensation,
   computeCreditLine,
   computeInterest,
-  extractMonthlySalaryUSD,
 } from './loanEngine'
 
 const APP_ID = import.meta.env.VITE_RECLAIM_APP_ID
@@ -12,30 +12,44 @@ const PROVIDER_ID = import.meta.env.VITE_RECLAIM_PROVIDER_ID
 
 function parseProof(proofs) {
   if (!proofs) return {}
-  const proof = Array.isArray(proofs) ? proofs[0] : proofs
-  if (!proof) return {}
+  const proofList = Array.isArray(proofs) ? proofs : [proofs]
+  const merged = {}
 
-  if (proof.extractedParameterValues) {
-    return typeof proof.extractedParameterValues === 'string'
-      ? JSON.parse(proof.extractedParameterValues)
-      : proof.extractedParameterValues
+  for (const proof of proofList) {
+    if (!proof) continue
+
+    if (proof.extractedParameterValues) {
+      const extracted = typeof proof.extractedParameterValues === 'string'
+        ? JSON.parse(proof.extractedParameterValues)
+        : proof.extractedParameterValues
+      Object.assign(merged, extracted || {})
+    }
+
+    if (proof.claimData?.context) {
+      const context =
+        typeof proof.claimData.context === 'string'
+          ? JSON.parse(proof.claimData.context)
+          : proof.claimData.context
+      Object.assign(merged, context?.extractedParameters || context || {})
+    }
+
+    if (proof.claimData?.parameters) {
+      const params =
+        typeof proof.claimData.parameters === 'string'
+          ? JSON.parse(proof.claimData.parameters)
+          : proof.claimData.parameters
+      Object.assign(merged, params || {})
+    }
+
+    if (proof.publicData) {
+      const publicData = typeof proof.publicData === 'string'
+        ? JSON.parse(proof.publicData)
+        : proof.publicData
+      Object.assign(merged, publicData || {})
+    }
   }
 
-  if (proof.claimData?.context) {
-    const context =
-      typeof proof.claimData.context === 'string'
-        ? JSON.parse(proof.claimData.context)
-        : proof.claimData.context
-    return context.extractedParameters || context
-  }
-
-  if (proof.publicData) {
-    return typeof proof.publicData === 'string'
-      ? JSON.parse(proof.publicData)
-      : proof.publicData
-  }
-
-  return typeof proof === 'object' ? proof : {}
+  return merged
 }
 
 export default function App() {
@@ -43,13 +57,14 @@ export default function App() {
   const [error, setError] = useState(null)
   const [iframeUrl, setIframeUrl] = useState(null)
   const [proofResult, setProofResult] = useState(null)
-  const [drawAmount, setDrawAmount] = useState('100')
+  const [drawAmount, setDrawAmount] = useState('50')
   const [outstanding, setOutstanding] = useState(0)
 
+  const compensation = useMemo(() => extractCompensation(proofResult), [proofResult])
+
   const creditDecision = useMemo(() => {
-    const salary = extractMonthlySalaryUSD(proofResult)
-    return computeCreditLine(salary)
-  }, [proofResult])
+    return computeCreditLine(compensation.monthlySalary, compensation)
+  }, [compensation])
 
   const remaining = creditDecision.approved
     ? Math.max(0, creditDecision.creditLimit - outstanding)
@@ -114,8 +129,13 @@ export default function App() {
     setOutstanding(0)
   }
 
+  const formatINR = (value) =>
+    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0)
+  const formatUSDC = (value) =>
+    new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value || 0)
+
   return (
-    <main className="page">
+    <main className={`page ${status === 'success' ? 'successMode' : ''}`}>
       <header className="topbar">
         <div className="brand">SalaryLine</div>
         <nav>
@@ -130,79 +150,83 @@ export default function App() {
       <div className="liveBar">Credit Lines are Live. Spots Left: 2/85</div>
       <p className="demoNote">Demo note: “Connect Wallet” is a UI placeholder and does not connect a real wallet in this MVP.</p>
 
-      <section className="heroWrap">
-        <section className="panel panelHero">
-          <div className="heroOrbs" aria-hidden="true">
-            <span />
-            <span />
-          </div>
-          <p className="eyebrow">Reclaim + Starknet MVP</p>
-          <h1>Private Salary Proof to USDC Credit Line</h1>
-          <div className="heroMeta">
-            <span>Privacy Preserving</span>
-            <span>USDC Credit Line</span>
-            <span>Reclaim Proof</span>
-          </div>
-          <p className="subtitle">
-            Verify salary via Reclaim, derive a simple credit limit, then simulate draw and repay.
-          </p>
+      {status !== 'success' && (
+        <section className="heroWrap">
+          <section className="panel panelHero">
+            <div className="heroOrbs" aria-hidden="true">
+              <span />
+              <span />
+            </div>
+            <p className="eyebrow">Reclaim + Starknet MVP</p>
+            <h1>Private Salary Proof to USDC Credit Line</h1>
+            <div className="heroMeta">
+              <span>Privacy Preserving</span>
+              <span>USDC Credit Line</span>
+              <span>Reclaim Proof</span>
+            </div>
+            <p className="subtitle">
+              Verify salary via Reclaim, convert INR salary to USDC, then withdraw from your line.
+            </p>
 
-          <button
-            className="primary"
-            onClick={handleVerify}
-            disabled={status === 'loading' || status === 'verifying'}
-          >
-            {status === 'loading' || status === 'verifying'
-              ? 'Starting verification...'
-              : 'Verify Salary Proof'}
-          </button>
+            <button
+              className="primary"
+              onClick={handleVerify}
+              disabled={status === 'loading' || status === 'verifying'}
+            >
+              {status === 'loading' || status === 'verifying'
+                ? 'Starting verification...'
+                : 'Verify Salary Proof'}
+            </button>
 
-          {status === 'error' && <p className="error">Error: {error}</p>}
+            {status === 'error' && <p className="error">Error: {error}</p>}
+          </section>
         </section>
-      </section>
+      )}
 
       {status === 'success' && (
-        <section className="panel resultsPanel">
-          <section className="card">
-            <h2>Credit Decision</h2>
-            {!creditDecision.approved && (
-              <p className="error">Declined: {creditDecision.reason}</p>
-            )}
+        <section className="loanScreen">
+          <section className="panel loanPanel">
+            <h2>Withdraw From Credit Line</h2>
+            {!creditDecision.approved && <p className="error">Declined: {creditDecision.reason}</p>}
 
             {creditDecision.approved && (
               <>
                 <div className="metrics">
-                  <Metric label="Monthly Salary (parsed)" value={`$${creditDecision.monthlySalary.toFixed(2)}`} />
-                  <Metric label="Credit Limit" value={`${creditDecision.creditLimit} USDC`} />
-                  <Metric label="APR" value={`${(creditDecision.aprBps / 100).toFixed(2)}%`} />
-                  <Metric label="Proof Validity" value={`${creditDecision.proofValidityDays} days`} />
+                  <Metric label="Monthly Salary (INR)" value={formatINR(creditDecision.monthlySalaryInr)} />
+                  <Metric label="Monthly Salary (USDC est.)" value={`${formatUSDC(creditDecision.monthlySalaryUsdc)} USDC`} />
+                  <Metric label="Credit Limit" value={`${formatUSDC(creditDecision.creditLimit)} USDC`} />
+                  <Metric label="FX Used" value={`1 USDC = INR ${creditDecision.fxInrPerUsdc}`} />
                 </div>
 
                 <div className="actions">
                   <input
                     value={drawAmount}
                     onChange={(event) => setDrawAmount(event.target.value)}
-                    placeholder="Draw amount"
+                    placeholder="Enter withdrawal amount (USDC)"
                   />
-                  <button onClick={handleDraw}>Draw</button>
+                  <button onClick={handleDraw}>Withdraw</button>
                   <button onClick={handleRepay} className="secondary">Repay</button>
                 </div>
 
                 <div className="summary">
-                  <p>Outstanding: {outstanding.toFixed(2)} USDC</p>
-                  <p>Remaining: {remaining.toFixed(2)} USDC</p>
-                  <p>Projected 30d Interest: {projected30DayInterest.toFixed(2)} USDC</p>
+                  <p>Outstanding: {formatUSDC(outstanding)} USDC</p>
+                  <p>Remaining: {formatUSDC(remaining)} USDC</p>
+                  <p>Projected 30d Interest: {formatUSDC(projected30DayInterest)} USDC</p>
+                  {creditDecision.detectedRawSalary && (
+                    <p>Detected salary input: {creditDecision.detectedRawSalary}</p>
+                  )}
+                  {creditDecision.salarySourcePath && (
+                    <p>Detected from field: {creditDecision.salarySourcePath}</p>
+                  )}
                 </div>
+
+                <details className="proofDetails">
+                  <summary>Show Raw Proof</summary>
+                  <pre>{JSON.stringify(proofResult, null, 2)}</pre>
+                </details>
               </>
             )}
           </section>
-
-          {proofResult && (
-            <section className="card">
-              <h2>Proof Payload</h2>
-              <pre>{JSON.stringify(proofResult, null, 2)}</pre>
-            </section>
-          )}
         </section>
       )}
 
