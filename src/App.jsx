@@ -75,7 +75,10 @@ export default function App() {
         APP_ID,
         APP_SECRET,
         PROVIDER_ID,
-        { useAppClip: false },
+        {
+          useAppClip: false,
+          customSharePageUrl: 'https://portal.reclaimprotocol.org/popcorn',
+        },
       )
 
       await reclaimRequest.startSession({
@@ -125,27 +128,41 @@ export default function App() {
       </header>
 
       <div className="liveBar">Credit Lines are Live. Spots Left: 2/85</div>
+      <p className="demoNote">Demo note: “Connect Wallet” is a UI placeholder and does not connect a real wallet in this MVP.</p>
 
-      <section className="panel">
-        <p className="eyebrow">Reclaim + Starknet MVP</p>
-        <h1>Private Salary Proof to USDC Credit Line</h1>
-        <p className="subtitle">
-          Verify salary via Reclaim, derive a simple credit limit, then simulate draw and repay.
-        </p>
+      <section className="heroWrap">
+        <section className="panel panelHero">
+          <div className="heroOrbs" aria-hidden="true">
+            <span />
+            <span />
+          </div>
+          <p className="eyebrow">Reclaim + Starknet MVP</p>
+          <h1>Private Salary Proof to USDC Credit Line</h1>
+          <div className="heroMeta">
+            <span>Privacy Preserving</span>
+            <span>USDC Credit Line</span>
+            <span>Reclaim Proof</span>
+          </div>
+          <p className="subtitle">
+            Verify salary via Reclaim, derive a simple credit limit, then simulate draw and repay.
+          </p>
 
-        <button
-          className="primary"
-          onClick={handleVerify}
-          disabled={status === 'loading' || status === 'verifying'}
-        >
-          {status === 'loading' || status === 'verifying'
-            ? 'Starting verification...'
-            : 'Verify Salary Proof'}
-        </button>
+          <button
+            className="primary"
+            onClick={handleVerify}
+            disabled={status === 'loading' || status === 'verifying'}
+          >
+            {status === 'loading' || status === 'verifying'
+              ? 'Starting verification...'
+              : 'Verify Salary Proof'}
+          </button>
 
-        {status === 'error' && <p className="error">Error: {error}</p>}
+          {status === 'error' && <p className="error">Error: {error}</p>}
+        </section>
+      </section>
 
-        {status === 'success' && (
+      {status === 'success' && (
+        <section className="panel resultsPanel">
           <section className="card">
             <h2>Credit Decision</h2>
             {!creditDecision.approved && (
@@ -179,15 +196,15 @@ export default function App() {
               </>
             )}
           </section>
-        )}
 
-        {proofResult && (
-          <section className="card">
-            <h2>Proof Payload</h2>
-            <pre>{JSON.stringify(proofResult, null, 2)}</pre>
-          </section>
-        )}
-      </section>
+          {proofResult && (
+            <section className="card">
+              <h2>Proof Payload</h2>
+              <pre>{JSON.stringify(proofResult, null, 2)}</pre>
+            </section>
+          )}
+        </section>
+      )}
 
       {iframeUrl && (
         <div className="iframeWrap">
