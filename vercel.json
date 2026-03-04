@@ -1,0 +1,9 @@
+{
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/withdraw", "destination": "/api/withdraw" },
+    { "source": "/api/health", "destination": "/api/health" }
+  ]
+}
