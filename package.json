@@ -5,13 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "node server/withdraw-server.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@cartridge/controller": "^0.13.9",
     "@reclaimprotocol/js-sdk": "^4.12.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "starknet": "^9.2.1",
+    "starkzap": "^1.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.0",

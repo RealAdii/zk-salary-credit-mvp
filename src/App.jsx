@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
 import { ReclaimProofRequest } from '@reclaimprotocol/js-sdk'
 import {
+  connectCartridgeWallet,
+  disconnectWallet,
+  getWalletUsdcBalance,
+} from './starkzapClient'
+import {
   extractCompensation,
   computeCreditLine,
   computeInterest,
@@ -9,6 +14,7 @@ import {
 const APP_ID = import.meta.env.VITE_RECLAIM_APP_ID
 const APP_SECRET = import.meta.env.VITE_RECLAIM_APP_SECRET
 const PROVIDER_ID = import.meta.env.VITE_RECLAIM_PROVIDER_ID
+const WITHDRAW_API = import.meta.env.VITE_WITHDRAW_API || '/api/withdraw'
 
 function parseProof(proofs) {
   if (!proofs) return {}
@@ -59,6 +65,11 @@ export default function App() {
   const [proofResult, setProofResult] = useState(null)
   const [drawAmount, setDrawAmount] = useState('50')
   const [outstanding, setOutstanding] = useState(0)
+  const [drawError, setDrawError] = useState(null)
+  const [walletAddress, setWalletAddress] = useState('')
+  const [walletUsdcBalance, setWalletUsdcBalance] = useState('0')
+  const [walletBusy, setWalletBusy] = useState(false)
+  const [onchainTxHash, setOnchainTxHash] = useState('')
 
   const compensation = useMemo(() => extractCompensation(proofResult), [proofResult])
 
@@ -118,122 +129,299 @@ export default function App() {
     }
   }, [])
 
-  function handleDraw() {
+  async function handleOnchainWithdraw() {
     const parsed = Number.parseFloat(drawAmount)
-    if (!creditDecision.approved || !Number.isFinite(parsed) || parsed <= 0) return
-    if (parsed > remaining) return
-    setOutstanding((value) => value + parsed)
+    setDrawError(null)
+    setOnchainTxHash('')
+
+    if (!creditDecision.approved) return
+    if (!walletAddress) {
+      setDrawError('Connect a Starknet wallet first.')
+      return
+    }
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDrawError('Enter a valid withdrawal amount.')
+      return
+    }
+    if (parsed > remaining) {
+      setDrawError('Withdrawal amount exceeds available credit.')
+      return
+    }
+
+    try {
+      setWalletBusy(true)
+      const response = await fetch(WITHDRAW_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: walletAddress,
+          amount: parsed.toString(),
+          proof: proofResult,
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || 'Treasury transfer failed')
+      }
+      setOnchainTxHash(data.txHash || '')
+      setOutstanding((value) => value + parsed)
+      const refreshed = await getWalletUsdcBalance().catch(() => null)
+      if (refreshed) setWalletUsdcBalance(refreshed)
+    } catch (error) {
+      setDrawError(error?.message || 'On-chain withdraw failed')
+    } finally {
+      setWalletBusy(false)
+    }
   }
 
   function handleRepay() {
     setOutstanding(0)
+    setDrawError(null)
+    setOnchainTxHash('')
+  }
+
+  function resetFlow() {
+    setStatus('idle')
+    setError(null)
+    setProofResult(null)
+    setOutstanding(0)
+    setDrawAmount('50')
+    setDrawError(null)
+    setOnchainTxHash('')
   }
 
   const formatINR = (value) =>
     new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value || 0)
   const formatUSDC = (value) =>
     new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value || 0)
+  const utilizationPct = creditDecision.approved && creditDecision.creditLimit > 0
+    ? (outstanding / creditDecision.creditLimit) * 100
+    : 0
+
+  const primaryCta = status === 'loading' || status === 'verifying'
+    ? 'Verifying...'
+    : walletBusy
+      ? 'Submitting...'
+      : status === 'success' && creditDecision.approved
+        ? 'Withdraw Onchain'
+      : 'Get a Quote'
+
+  const payrollProviders = [
+    {
+      id: 'razorpay',
+      label: 'Razorpay Payroll',
+      logo: 'https://logo.clearbit.com/razorpay.com',
+      fallback: 'R',
+      active: true,
+    },
+    {
+      id: 'deel',
+      label: 'Deel',
+      logo: 'https://logo.clearbit.com/deel.com',
+      fallback: 'D',
+      active: false,
+    },
+    {
+      id: 'rippling',
+      label: 'Rippling',
+      logo: 'https://logo.clearbit.com/rippling.com',
+      fallback: 'Ri',
+      active: false,
+    },
+    {
+      id: 'workday',
+      label: 'Workday',
+      logo: 'https://logo.clearbit.com/workday.com',
+      fallback: 'W',
+      active: false,
+    },
+  ]
+
+  function handlePrimaryAction() {
+    if (status === 'loading' || status === 'verifying' || walletBusy) return
+    if (status === 'success' && creditDecision.approved) {
+      handleOnchainWithdraw()
+      return
+    }
+    handleVerify()
+  }
+
+  async function handleConnectWallet() {
+    try {
+      setDrawError(null)
+      setWalletBusy(true)
+
+      if (walletAddress) {
+        await disconnectWallet()
+        setWalletAddress('')
+        setWalletUsdcBalance('0')
+        setWalletBusy(false)
+        return
+      }
+
+      const wallet = await connectCartridgeWallet()
+      setWalletAddress(wallet.address.toString())
+      const bal = await getWalletUsdcBalance().catch(() => '0')
+      setWalletUsdcBalance(bal)
+    } catch (error) {
+      setDrawError(error?.message || 'Wallet connection failed')
+    } finally {
+      setWalletBusy(false)
+    }
+  }
+
+  const [creditOpen, setCreditOpen] = useState(false)
 
   return (
-    <main className={`page ${status === 'success' ? 'successMode' : ''}`}>
+    <main className="page">
       <header className="topbar">
         <div className="brand">SalaryLine</div>
-        <nav>
-          <span>Farm</span>
-          <span>Supply</span>
-          <span className="active">Pull</span>
-          <span>Info</span>
-        </nav>
-        <button className="walletBtn">Connect Wallet</button>
+        <button className="walletBtn" onClick={handleConnectWallet}>
+          {walletAddress
+            ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`
+            : 'Connect Wallet'}
+        </button>
       </header>
 
-      <div className="liveBar">Credit Lines are Live. Spots Left: 2/85</div>
-      <p className="demoNote">Demo note: “Connect Wallet” is a UI placeholder and does not connect a real wallet in this MVP.</p>
+      <div className="content">
+        <section className="statsStrip">
+          <article>
+            <span className="statLabel">Implied APY</span>
+            <strong>{((creditDecision.aprBps || 0) / 100).toFixed(2)}%</strong>
+          </article>
+          <article>
+            <span className="statLabel">Cash</span>
+            <strong>{formatUSDC(remaining)}/{formatUSDC(creditDecision.creditLimit || 0)}</strong>
+          </article>
+          <article>
+            <span className="statLabel">Outstanding</span>
+            <strong>{formatUSDC(outstanding)} USDC</strong>
+          </article>
+        </section>
 
-      {status !== 'success' && (
-        <section className="heroWrap">
-          <section className="panel panelHero">
-            <div className="heroOrbs" aria-hidden="true">
-              <span />
-              <span />
+        <section className="moneyCard">
+          <div className="moneyHead">
+            <p>[ACCESS CREDIT LINE]</p>
+            <div className="tabGroup">
+              <span className="activeTab">Draw</span>
+              <span>Pay</span>
             </div>
-            <p className="eyebrow">Reclaim + Starknet MVP</p>
-            <h1>Private Salary Proof to USDC Credit Line</h1>
-            <div className="heroMeta">
-              <span>Privacy Preserving</span>
-              <span>USDC Credit Line</span>
-              <span>Reclaim Proof</span>
-            </div>
-            <p className="subtitle">
-              Verify salary via Reclaim, convert INR salary to USDC, then withdraw from your line.
+          </div>
+
+          <div className="quoteValue">${formatUSDC(creditDecision.creditLimit || 0)}</div>
+          <div className="maxDraw">MAX DRAW {formatUSDC(remaining)} USDC</div>
+
+          <div className="inputRow">
+            <input
+              value={drawAmount}
+              onChange={(event) => setDrawAmount(event.target.value)}
+              placeholder="Amount in USDC"
+            />
+            <button className="repayBtn" onClick={handleRepay}>Repay</button>
+          </div>
+
+          <button
+            className="primaryBtn"
+            onClick={handlePrimaryAction}
+            disabled={status === 'loading' || status === 'verifying' || walletBusy}
+          >
+            {primaryCta}
+          </button>
+
+          {drawError && <p className="error">{drawError}</p>}
+          {error && <p className="error">Error: {error}</p>}
+
+          <div className="summaryRows">
+            <p><span>Balance</span><strong>{formatUSDC(outstanding)} USDC</strong></p>
+            <p><span>Utilization</span><strong>{utilizationPct.toFixed(1)}%</strong></p>
+            <p><span>Monthly Salary</span><strong>{formatINR(creditDecision.monthlySalaryInr)}</strong></p>
+            <p><span>Salary (USDC)</span><strong>{formatUSDC(creditDecision.monthlySalaryUsdc)} USDC</strong></p>
+            <p><span>30d Interest</span><strong>{formatUSDC(projected30DayInterest)} USDC</strong></p>
+            <p><span>Wallet</span><strong>{walletAddress ? `${walletAddress.slice(0, 8)}...${walletAddress.slice(-6)}` : 'Not connected'}</strong></p>
+            {walletAddress && <p><span>Wallet USDC</span><strong>{walletUsdcBalance}</strong></p>}
+          </div>
+
+          {onchainTxHash && (
+            <p className="txHash">
+              Tx:{' '}
+              <a href={`https://sepolia.voyager.online/tx/${onchainTxHash}`} target="_blank" rel="noreferrer">
+                {onchainTxHash.slice(0, 12)}...{onchainTxHash.slice(-8)}
+              </a>
             </p>
-
-            <button
-              className="primary"
-              onClick={handleVerify}
-              disabled={status === 'loading' || status === 'verifying'}
-            >
-              {status === 'loading' || status === 'verifying'
-                ? 'Starting verification...'
-                : 'Verify Salary Proof'}
-            </button>
-
-            {status === 'error' && <p className="error">Error: {error}</p>}
-          </section>
+          )}
         </section>
-      )}
 
-      {status === 'success' && (
-        <section className="loanScreen">
-          <section className="panel loanPanel">
-            <h2>Withdraw From Credit Line</h2>
-            {!creditDecision.approved && <p className="error">Declined: {creditDecision.reason}</p>}
+        <section className="creditInfoCard">
+          <button className="creditToggle" onClick={() => setCreditOpen((v) => !v)}>
+            <span>Credit Info</span>
+            <span className={`arrow ${creditOpen ? 'open' : ''}`}>&#9660;</span>
+          </button>
 
-            {creditDecision.approved && (
-              <>
-                <div className="metrics">
-                  <Metric label="Monthly Salary (INR)" value={formatINR(creditDecision.monthlySalaryInr)} />
-                  <Metric label="Monthly Salary (USDC est.)" value={`${formatUSDC(creditDecision.monthlySalaryUsdc)} USDC`} />
-                  <Metric label="Credit Limit" value={`${formatUSDC(creditDecision.creditLimit)} USDC`} />
-                  <Metric label="FX Used" value={`1 USDC = INR ${creditDecision.fxInrPerUsdc}`} />
+          {creditOpen && (
+            <div className="creditBody">
+              <div className="creditSection">
+                <div className="creditSectionLabel">Credit Score</div>
+                <div className="creditRow">
+                  <span>Score</span>
+                  <strong>{status === 'success' && creditDecision.approved ? '720 / 1000' : '0 / 1000'}</strong>
                 </div>
+              </div>
 
-                <div className="actions">
-                  <input
-                    value={drawAmount}
-                    onChange={(event) => setDrawAmount(event.target.value)}
-                    placeholder="Enter withdrawal amount (USDC)"
-                  />
-                  <button onClick={handleDraw}>Withdraw</button>
-                  <button onClick={handleRepay} className="secondary">Repay</button>
-                </div>
+              <div className="creditSection">
+                <div className="creditSectionLabel">Payroll Providers</div>
+                {payrollProviders.map((provider) => (
+                  <div key={provider.id} className="providerRow">
+                    <div className="providerIdentity">
+                      <span className="providerLogo">
+                        <img
+                          src={provider.logo}
+                          alt={`${provider.label} logo`}
+                          loading="lazy"
+                          onError={(event) => {
+                            event.currentTarget.style.display = 'none'
+                            const fallback = event.currentTarget.nextElementSibling
+                            if (fallback) fallback.style.display = 'grid'
+                          }}
+                        />
+                        <span className="fallbackLogo">{provider.fallback}</span>
+                      </span>
+                      <div className="providerText">
+                        <span>{provider.label}</span>
+                        <small>{provider.active ? 'Ready now' : 'Integration pending'}</small>
+                      </div>
+                    </div>
+                    {provider.active ? (
+                      <button className="connectBtn" onClick={handleConnectWallet}>
+                        {walletAddress ? 'Connected' : 'Connect'}
+                      </button>
+                    ) : (
+                      <button className="comingBtn" disabled>Coming Soon</button>
+                    )}
+                  </div>
+                ))}
+              </div>
 
-                <div className="summary">
-                  <p>Outstanding: {formatUSDC(outstanding)} USDC</p>
-                  <p>Remaining: {formatUSDC(remaining)} USDC</p>
-                  <p>Projected 30d Interest: {formatUSDC(projected30DayInterest)} USDC</p>
-                  {creditDecision.detectedRawSalary && (
-                    <p>Detected salary input: {creditDecision.detectedRawSalary}</p>
-                  )}
-                  {creditDecision.salarySourcePath && (
-                    <p>Detected from field: {creditDecision.salarySourcePath}</p>
-                  )}
-                </div>
+              <details className="proofDetails">
+                <summary>Show Raw Proof</summary>
+                <pre>{JSON.stringify(proofResult, null, 2)}</pre>
+              </details>
 
-                <details className="proofDetails">
-                  <summary>Show Raw Proof</summary>
-                  <pre>{JSON.stringify(proofResult, null, 2)}</pre>
-                </details>
-              </>
-            )}
-          </section>
+              <button
+                className="connectBtn"
+                style={{ marginTop: '0.75rem', width: '100%', textAlign: 'center' }}
+                onClick={resetFlow}
+              >
+                Reset
+              </button>
+            </div>
+          )}
         </section>
-      )}
+      </div>
 
       {iframeUrl && (
         <div className="iframeWrap">
           <button
-            className="close"
+            className="closeBtn"
             onClick={() => {
               setIframeUrl(null)
               if (status === 'verifying') setStatus('idle')
@@ -245,14 +433,5 @@ export default function App() {
         </div>
       )}
     </main>
-  )
-}
-
-function Metric({ label, value }) {
-  return (
-    <article className="metric">
-      <p>{label}</p>
-      <strong>{value}</strong>
-    </article>
   )
 }
