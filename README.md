@@ -26,12 +26,12 @@ The thesis is simple: if we can trustlessly verify that someone earns X per mont
 
 ## StarkZap integration
 
-We used [StarkZap](https://github.com/keep-starknet-strange/starkzap/) to plug into the Starknet ecosystem instantly. StarkZap handles:
+We used [StarkZap](https://github.com/keep-starknet-strange/starkzap/) to plug into the Starknet ecosystem instantly. StarkZap is an SDK from [StarkWare](https://starkware.co/) — the $2B company behind Starknet, StarkEx, and the STARK proof system that secures billions in TVL. StarkZap handles:
 - **Wallet onboarding** — one-call Cartridge Controller integration with session policies
 - **Token balance reads** — real-time USDC balance for connected wallets
 - **Network abstraction** — Sepolia config, token registries, and RPC setup out of the box
 
-Instead of writing custom wallet connection logic, StarkZap let us go from zero to working wallet integration in minutes. This is what composability looks like.
+Instead of writing custom wallet connection logic, StarkZap let us go from zero to working wallet integration in minutes. This is what composability looks like — one `npm install` and we had wallet connect, balance reads, and token transfers working out of the box on Starknet.
 
 ## Quick start
 
